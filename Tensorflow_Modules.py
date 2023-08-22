@@ -11,13 +11,13 @@ class Conv(Layer):
     
     def __init__(self, c2, k=1, s=1, p=None, g=1, d=1, act=True):
         super().__init__()
-
+        
         self.conv = keras.layers.Conv2D(filters=c2, kernel_size=k, strides=s, padding=p, groups=g, dilation_rate=d, use_bias=False)
         self.bn = keras.layers.BatchNormalization()
         
         if act is True:
             self.act = self.default_act
-        elif isinstance(act, keras.layers.Layer):
+        elif isinstance(act, tf.keras.activations):
             self.act = act
         else:
             self.act = keras.layers.Activation(act) if act is not None else keras.layers.Identity()
@@ -210,7 +210,7 @@ class Segment(Detect):
         self.npr = npr  # number of protos
         self.proto = Proto(self.npr, self.nm)   # protos
         self.detect = Detect.call
-
+        
         c4 = max(ch[0] // 4, self.nm)
         self.cv4 = [tf.keras.Sequential([
             Conv(c4, k=3, s=1, p='same'),
@@ -240,11 +240,12 @@ class Segment(Detect):
 class Yolov8Seg(tf.keras.Model):
     #Yolov8 Segmentation Model, input channel must be a multiple of 32
     #Base model structure based on https://arxiv.org/abs/2304.00501
-    def __init__(self, nc=80, training=None):
+    def __init__(self, input_shape, nc=80, training=None):
         super(Yolov8Seg, self).__init__()
         self.training = training
         self.nc = nc
         # Backbone
+        self.input_layer = tf.keras.layers.InputLayer(input_shape=input_shape)
         self.cv1 = Conv(c2=64, k=3, s=2, p='same')  #p1
         self.cv2 = Conv(c2=128, k=3, s=2, p='same')  #p2
         self.c2f1 = C2f(c2=128, n=3, shortcut=True)
@@ -273,7 +274,7 @@ class Yolov8Seg(tf.keras.Model):
             self.sppf
         ])        
         # Head
-        self.upsample = keras.layers.UpSampling2D(size=2, interpolation='nearest')
+        self.upsample = keras.layers.UpSampling2D(size=2, interpolation='bilinear')
         #self.upsample = lambda x: tf.image.resize(x, (x.shape[1] * 2, x.shape[2] * 2), method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
         self.c2f5 = C2f(c2=512, n=3, shortcut=False) #   - c2=512 x w
         self.c2f6 = C2f(c2=256, n=3, shortcut=False) #p3
@@ -285,8 +286,8 @@ class Yolov8Seg(tf.keras.Model):
         
     def call(self, img):
         # Backbone
-        #add input layer
-        x1 = self.seq1(img, training=self.training)
+        x = self.input_layer(img)
+        x1 = self.seq1(x, training=self.training)
         x2 = self.seq2(x1, training=self.training)
         x3 = self.seq3(x2, training=self.training)
         # Head
@@ -302,31 +303,14 @@ class Yolov8Seg(tf.keras.Model):
         out = seg(seginputs, training=self.training)
         return out
 
-
-#Test yolov8 model
-model = Yolov8Seg(nc=2, training=False)
 batch_size = 1
-inputtensor = tf.random.normal((batch_size, 640, 640, 3))
-
-# Training mode
-#outputs_train = model(inputtensor, nc=2, training=True)
-#print("seg_output:", outputs_train)
-
-# Inference mode 
-outputs_inference = model(inputtensor)
-print("seg_output:", outputs_inference)
+inputtensor = tf.random.normal((batch_size, 640, 640, 3)) #replace with actual images
+#Test yolov8 model
+model = Yolov8Seg(inputtensor.shape, nc=2, training=False)
 
 
+# Model output 
+outputs = model(inputtensor)
+print("seg_output:", outputs)
 
-#testing detect/segment head
-#input_channels = [256, 512, 512]
-#detect_model = Detect(ch=input_channels)
-#segment_model = Segment(ch=input_channels)
-#batch_size = 1
-#tensor1 = tf.random.normal((batch_size, 80, 80, 256))
-#tensor2 = tf.random.normal((batch_size, 40, 40, 512))
-#tensor3 = tf.random.normal((batch_size, 40, 40, 512))
-#input_tensors = [tensor1, tensor2, tensor3]
-#dbox_output = detect_model(input_tensors)
-#seg_output = segment_model(input_tensors)
-#print("seg_output:", seg_output)
+
