@@ -235,13 +235,15 @@ class Segment(Detect):
         print("training:", training)
         if training:
            return x, mc, p
-        return (tf.concat([x, mc], axis=1), p) if self.export else (tf.concat([x[0], mc], axis=2), (x[1], mc, p))
+        return (tf.concat([x, mc], axis=2), p) if self.export else (tf.concat([x[0], mc], axis=2), (x[1], mc, p))
   
 class Yolov8Seg(tf.keras.Model):
     #Yolov8 Segmentation Model, input channel must be a multiple of 32
     #Base model structure based on https://arxiv.org/abs/2304.00501
-    def __init__(self):
+    def __init__(self, nc=80, training=None):
         super(Yolov8Seg, self).__init__()
+        self.training = training
+        self.nc = nc
         # Backbone
         self.cv1 = Conv(c2=64, k=3, s=2, p='same')  #p1
         self.cv2 = Conv(c2=128, k=3, s=2, p='same')  #p2
@@ -281,27 +283,28 @@ class Yolov8Seg(tf.keras.Model):
         self.c2f8 = C2f(c2=512, n=3, shortcut=False) #p5 - c2=512 x w x r
         self.segment = lambda nc, ch: Segment(nc=nc, ch=ch)
         
-    def call(self, img, nc, training=None):
+    def call(self, img):
         # Backbone
-        x1 = self.seq1(img, training=training)
-        x2 = self.seq2(x1, training=training)
-        x3 = self.seq3(x2, training=training)
+        #add input layer
+        x1 = self.seq1(img, training=self.training)
+        x2 = self.seq2(x1, training=self.training)
+        x3 = self.seq3(x2, training=self.training)
         # Head
-        x4 = self.c2f5(tf.concat([self.upsample(x3), x2], axis=3), training=training)
-        xs1 = self.c2f6(tf.concat([self.upsample(x4), x1], axis=3), training=training)
-        xs2 = self.c2f7(tf.concat([self.cv6(xs1, training=training), x4], axis=3), training=training)
-        xs3 = self.c2f8(tf.concat([self.cv7(xs2, training=training), x3], axis=3), training=training)
+        x4 = self.c2f5(tf.concat([self.upsample(x3), x2], axis=3), training=self.training)
+        xs1 = self.c2f6(tf.concat([self.upsample(x4), x1], axis=3), training=self.training)
+        xs2 = self.c2f7(tf.concat([self.cv6(xs1, training=self.training), x4], axis=3), training=self.training)
+        xs3 = self.c2f8(tf.concat([self.cv7(xs2, training=self.training), x3], axis=3), training=self.training)
         # Segmentation
         ch = [xs1.shape[-1], xs2.shape[-1], xs3.shape[-1]]
         seginputs = [xs1, xs2, xs3]
         
-        seg = self.segment(nc=nc, ch=ch)
-        out = seg(seginputs, training=training)
+        seg = self.segment(nc=self.nc, ch=ch)
+        out = seg(seginputs, training=self.training)
         return out
 
 
 #Test yolov8 model
-model = Yolov8Seg()
+model = Yolov8Seg(nc=2, training=False)
 batch_size = 1
 inputtensor = tf.random.normal((batch_size, 640, 640, 3))
 
@@ -310,7 +313,7 @@ inputtensor = tf.random.normal((batch_size, 640, 640, 3))
 #print("seg_output:", outputs_train)
 
 # Inference mode 
-outputs_inference = model(inputtensor, nc=2, training=False)
+outputs_inference = model(inputtensor)
 print("seg_output:", outputs_inference)
 
 
