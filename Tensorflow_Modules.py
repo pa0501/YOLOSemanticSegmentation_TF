@@ -2,7 +2,7 @@ import tensorflow as tf
 import tensorflow.keras as keras
 import tensorflow.nn as nn
 from keras.layers import Layer
-
+import numpy as np
 #TF implementation
 class Conv(Layer):
     # Standard convolution with args(ch_out, kernel, stride, padding, group, dilation, activation). Default data format is channel last
@@ -204,13 +204,13 @@ class Proto(Layer):
         return x
 
 class Segment(Detect):
-    def __init__(self, nc=80, nm=32, npr=256, ch=()):
+    def __init__(self, nc=80, nm=32, npr=256, ch=(), bs=1):
         super().__init__(nc, ch)
         self.nm = nm  # number of masks
         self.npr = npr  # number of protos
         self.proto = Proto(self.npr, self.nm)   # protos
         self.detect = Detect.call
-        
+        self.bs = bs
         c4 = max(ch[0] // 4, self.nm)
         self.cv4 = [tf.keras.Sequential([
             Conv(c4, k=3, s=1, p='same'),
@@ -220,12 +220,12 @@ class Segment(Detect):
 
     def call(self, x, training=None):
         p = self.proto(x[0], training=training)  # mask protos
-        bs = p.shape[0]  # batch size
+        #bs = p.shape[0]  # batch size
         mc_parts = []
         for i in range(self.nl):
         # Convolution and reshape operations
             conv_result = self.cv4[i](x[i], training=training)
-            reshaped_result = tf.reshape(conv_result, (bs, -1, self.nm))
+            reshaped_result = tf.reshape(conv_result, (self.bs, -1, self.nm))
         # Add the processed result to the list
             mc_parts.append(reshaped_result)
             
@@ -237,15 +237,15 @@ class Segment(Detect):
            return x, mc, p
         return (tf.concat([x, mc], axis=2), p) if self.export else (tf.concat([x[0], mc], axis=2), (x[1], mc, p))
   
-class Yolov8Seg(tf.keras.Model):
+class Yolov8Seg_Model(tf.keras.Model):
     #Yolov8 Segmentation Model, input channel must be a multiple of 32
     #Base model structure based on https://arxiv.org/abs/2304.00501
-    def __init__(self, input_shape, nc=80, training=None):
-        super(Yolov8Seg, self).__init__()
-        self.training = training
-        self.nc = nc
+    def __init__(self, input_shape):
+        super(Yolov8Seg_Model, self).__init__()
         # Backbone
+        #self.inputs = tf.keras.layers.Input(shape=input_shape[1:], batch_size = input_shape[0])
         self.input_layer = tf.keras.layers.InputLayer(input_shape=input_shape)
+        self.inputs = self.input_layer.input
         self.cv1 = Conv(c2=64, k=3, s=2, p='same')  #p1
         self.cv2 = Conv(c2=128, k=3, s=2, p='same')  #p2
         self.c2f1 = C2f(c2=128, n=3, shortcut=True)
@@ -282,35 +282,42 @@ class Yolov8Seg(tf.keras.Model):
         self.c2f7 = C2f(c2=512, n=3, shortcut=False) #p4 - c2=512 x w
         self.cv7 = Conv(c2=512, k=3, s=2, p='same')  #p4 - c2=512 x w
         self.c2f8 = C2f(c2=512, n=3, shortcut=False) #p5 - c2=512 x w x r
-        self.segment = lambda nc, ch: Segment(nc=nc, ch=ch)
-        
-    def call(self, img):
-        # Backbone
-        x = self.input_layer(img)
-        x1 = self.seq1(x, training=self.training)
-        x2 = self.seq2(x1, training=self.training)
-        x3 = self.seq3(x2, training=self.training)
-        # Head
-        x4 = self.c2f5(tf.concat([self.upsample(x3), x2], axis=3), training=self.training)
-        xs1 = self.c2f6(tf.concat([self.upsample(x4), x1], axis=3), training=self.training)
-        xs2 = self.c2f7(tf.concat([self.cv6(xs1, training=self.training), x4], axis=3), training=self.training)
-        xs3 = self.c2f8(tf.concat([self.cv7(xs2, training=self.training), x3], axis=3), training=self.training)
-        # Segmentation
-        ch = [xs1.shape[-1], xs2.shape[-1], xs3.shape[-1]]
-        seginputs = [xs1, xs2, xs3]
-        
-        seg = self.segment(nc=self.nc, ch=ch)
-        out = seg(seginputs, training=self.training)
-        return out
+        self.segment = lambda nc, ch, bs: Segment(nc=nc, ch=ch, bs=bs)
 
-batch_size = 1
-inputtensor = tf.random.normal((batch_size, 640, 640, 3)) #replace with actual images
-#Test yolov8 model
-model = Yolov8Seg(inputtensor.shape, nc=2, training=False)
+def Yolov8_Seg(batch_size, input_shape, nc=80, training=None):
+    model = Yolov8Seg_Model(input_shape)
+    print("modelinput", model.inputs)
+    x1 = model.seq1(model.inputs, training=training)
+    x2 = model.seq2(x1, training=training)
+    x3 = model.seq3(x2, training=training)
+    # Head
+    x4 = model.c2f5(tf.concat([model.upsample(x3), x2], axis=3), training=training)
+    xs1 = model.c2f6(tf.concat([model.upsample(x4), x1], axis=3), training=training)
+    xs2 = model.c2f7(tf.concat([model.cv6(xs1, training=training), x4], axis=3), training=training)
+    xs3 = model.c2f8(tf.concat([model.cv7(xs2, training=training), x3], axis=3), training=training)
+    # Segmentation
+    ch = [xs1.shape[-1], xs2.shape[-1], xs3.shape[-1]]
+    seginputs = [xs1, xs2, xs3]
+    print("seginputs", seginputs)
+    seg = model.segment(nc=nc, ch=ch, bs=batch_size)
+    outputs = seg(seginputs, training=training)
 
+    segment_model = tf.keras.models.Model(inputs=model.inputs, outputs=outputs, name='Yolov8-Segmentation')
+    return segment_model
 
-# Model output 
-outputs = model(inputtensor)
-print("seg_output:", outputs)
+if __name__ == "__main__":
+    batchsize = 1
+    input_shape = (640, 640, 3)
+    nclasses = 2
+    model = Yolov8_Seg(batchsize, input_shape, nc=nclasses, training=True)
 
+    # Print model summary
+    model.summary()
 
+    # Generate random input tensor
+    batch_size = 1
+    input_tensor = tf.random.normal((batch_size,) + input_shape)
+
+    # Pass input_tensor through the model
+    output = model(input_tensor)
+    print(output)
