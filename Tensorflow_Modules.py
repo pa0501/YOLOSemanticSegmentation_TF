@@ -21,13 +21,25 @@ class Conv(Layer):
             self.act = act
         else:
             self.act = keras.layers.Activation(act) if act is not None else keras.layers.Identity()
-
+    
     def call(self, x, training=None):
         return self.act(self.bn(self.conv(x), training=training))
 
     def forward_fuse(self, x):
         return self.act(self.conv(x))
-
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "c2": self.c2,
+            "k": self.k,
+            "s": self.s,
+            "p": self.p,
+            "g": self.g,
+            "d": self.d,
+            "act": self.act
+        })
+        return config
     
 class Bottleneck(Layer):
     # Standard bottleneck
@@ -204,13 +216,13 @@ class Proto(Layer):
         return x
 
 class Segment(Detect):
-    def __init__(self, nc=80, nm=32, npr=256, ch=(), bs=1):
+    def __init__(self, nc=80, nm=32, npr=256, ch=()):
         super().__init__(nc, ch)
         self.nm = nm  # number of masks
         self.npr = npr  # number of protos
         self.proto = Proto(self.npr, self.nm)   # protos
         self.detect = Detect.call
-        self.bs = bs
+        
         c4 = max(ch[0] // 4, self.nm)
         self.cv4 = [tf.keras.Sequential([
             Conv(c4, k=3, s=1, p='same'),
@@ -220,12 +232,14 @@ class Segment(Detect):
 
     def call(self, x, training=None):
         p = self.proto(x[0], training=training)  # mask protos
-        #bs = p.shape[0]  # batch size
+        bs = p.shape[0]  # batch size
+        if bs is None:
+            bs = 1
         mc_parts = []
         for i in range(self.nl):
         # Convolution and reshape operations
             conv_result = self.cv4[i](x[i], training=training)
-            reshaped_result = tf.reshape(conv_result, (self.bs, -1, self.nm))
+            reshaped_result = tf.reshape(conv_result, (bs, -1, self.nm))
         # Add the processed result to the list
             mc_parts.append(reshaped_result)
             
@@ -244,8 +258,8 @@ class Yolov8Seg_Model(tf.keras.Model):
         super(Yolov8Seg_Model, self).__init__()
         # Backbone
         #self.inputs = tf.keras.layers.Input(shape=input_shape[1:], batch_size = input_shape[0])
-        self.input_layer = tf.keras.layers.InputLayer(input_shape=input_shape)
-        self.inputs = self.input_layer.input
+        
+        self.inputs = tf.keras.layers.Input(shape=input_shape)
         self.cv1 = Conv(c2=64, k=3, s=2, p='same')  #p1
         self.cv2 = Conv(c2=128, k=3, s=2, p='same')  #p2
         self.c2f1 = C2f(c2=128, n=3, shortcut=True)
@@ -282,11 +296,11 @@ class Yolov8Seg_Model(tf.keras.Model):
         self.c2f7 = C2f(c2=512, n=3, shortcut=False) #p4 - c2=512 x w
         self.cv7 = Conv(c2=512, k=3, s=2, p='same')  #p4 - c2=512 x w
         self.c2f8 = C2f(c2=512, n=3, shortcut=False) #p5 - c2=512 x w x r
-        self.segment = lambda nc, ch, bs: Segment(nc=nc, ch=ch, bs=bs)
+        self.segment = lambda nc, ch: Segment(nc=nc, ch=ch)
 
-def Yolov8_Seg(batch_size, input_shape, nc=80, training=None):
+def Yolov8_Seg(input_shape, nc=80, training=None):
     model = Yolov8Seg_Model(input_shape)
-    print("modelinput", model.inputs)
+    #print("modelinput", model.inputs)
     x1 = model.seq1(model.inputs, training=training)
     x2 = model.seq2(x1, training=training)
     x3 = model.seq3(x2, training=training)
@@ -299,17 +313,17 @@ def Yolov8_Seg(batch_size, input_shape, nc=80, training=None):
     ch = [xs1.shape[-1], xs2.shape[-1], xs3.shape[-1]]
     seginputs = [xs1, xs2, xs3]
     print("seginputs", seginputs)
-    seg = model.segment(nc=nc, ch=ch, bs=batch_size)
+    seg = model.segment(nc=nc, ch=ch)
     outputs = seg(seginputs, training=training)
 
     segment_model = tf.keras.models.Model(inputs=model.inputs, outputs=outputs, name='Yolov8-Segmentation')
     return segment_model
 
 if __name__ == "__main__":
-    batchsize = 1
-    input_shape = (640, 640, 3)
+    input_shape = (640, 640, 1)
+    #input_tensor = tf.keras.layers.Input(shape=input_shape)
     nclasses = 2
-    model = Yolov8_Seg(batchsize, input_shape, nc=nclasses, training=True)
+    model = Yolov8_Seg(input_shape, nc=nclasses, training=True)
 
     # Print model summary
     model.summary()
