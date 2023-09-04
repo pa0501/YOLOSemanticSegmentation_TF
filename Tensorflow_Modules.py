@@ -1,106 +1,120 @@
 import tensorflow as tf
 import tensorflow.keras as keras
 import tensorflow.nn as nn
-from keras.layers import Layer
+from keras import layers
 import numpy as np
 #TF implementation
-class Conv(Layer):
-    # Standard convolution with args(ch_out, kernel, stride, padding, group, dilation, activation). Default data format is channel last
-
-    default_act = tf.keras.layers.Activation(tf.keras.activations.swish)  # default activation
-    
-    def __init__(self, c2, k=1, s=1, p=None, g=1, d=1, act=True):
+class Conv(layers.Layer):
+    def __init__(
+        self,
+        output_channel,
+        kernel_size=1,
+        strides=1,
+        activation="swish"):
+        
         super().__init__()
-        
-        self.conv = keras.layers.Conv2D(filters=c2, kernel_size=k, strides=s, padding=p, groups=g, dilation_rate=d, use_bias=False)
-        self.bn = keras.layers.BatchNormalization()
-        
-        if act is True:
-            self.act = self.default_act
-        elif isinstance(act, tf.keras.activations):
-            self.act = act
-        else:
-            self.act = keras.layers.Activation(act) if act is not None else keras.layers.Identity()
-    
-    def call(self, x, training=None):
-        return self.act(self.bn(self.conv(x), training=training))
 
-    def forward_fuse(self, x):
-        return self.act(self.conv(x))
+        self.kernel_size = kernel_size
+        self.activation = activation
+        
+        self.conv = layers.Conv2D(filters=output_channel,
+                                  kernel_size=kernel_size,
+                                  strides=strides,
+                                  padding="valid",
+                                  use_bias=False)
+        
+        self.bn = layers.BatchNormalization(momentum=BATCH_NORM_MOMENTUM,
+                                            epsilon=BATCH_NORM_EPSILON)
+    
+    def call(self, x):
+        if self.kernel_size > 1:
+            inputs = layers.ZeroPadding2D(padding=kernel_size//2)(x)
+
+        x = self.bn(self.conv(inputs))
+        x = layers.Activation(self.activation)(x)
+        return x
     
     def get_config(self):
         config = super().get_config()
         config.update({
-            "c2": self.c2,
-            "k": self.k,
-            "s": self.s,
-            "p": self.p,
-            "g": self.g,
-            "d": self.d,
-            "act": self.act
+            "output_channel": self.output_channel,
+            "kernel_size": self.kernel_size,
+            "strides": self.strides,
+            "activation": self.activation
         })
         return config
     
-class Bottleneck(Layer):
+class Bottleneck(layers.Layer):
     # Standard bottleneck
-    def __init__(self, c2, shortcut=None, g=1, k=(3, 3), e=0.5):
+    def __init__(self,
+                 output_channel,
+                 shortcut=None,
+                 k=(3, 3),
+                 e=0.5):
         super().__init__()
-        c_ = int(c2 * e)
-        self.cv1 = Conv(c_, k[0], s = 1, p='same')
-        self.cv2 = Conv(c2, k[1],s = 1, p='same', g=g)
+        self.c2 = output_channel
+        self.c1 = int(self.c2 * e)
+        self.cv1 = Conv(self.c1, kernel_size=k[0])
+        self.cv2 = Conv(self.c2, kernel_size=k[1])
         self.add = shortcut
         
-    def call(self, x, training=None):
-        x1 = self.cv1(x, training=training)
-        x2 = self.cv2(x1, training=training)
+    def call(self, x):
+        x1 = self.cv1(x)
+        x2 = self.cv2(x1)
         return x + x2 if self.add else x2
     
-class C2f(Layer):
+class C2f(layers.Layer):
     # CSP Bottleneck with 2 convolutions
-    def __init__(self, c2, n=1, shortcut=None, g=1, e=0.5): #ch_out, number, shortcut, groups, expansion
+    def __init__(self,
+                 output_channel,
+                 repeat=1,
+                 shortcut=None,
+                 e=0.5):
         super().__init__()
-        self.c = int(c2 * e) # hidden channels
-        self.cv1 = Conv(2 * self.c, k=1, s=1, p='valid')
-        self.cv2 = Conv(c2, k=1, s=1, p='valid')
-        self.m = [Bottleneck(self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n)]
+        self.c2 = output_channel
+        self.c = int(self.c2 * e) # hidden channels
+        self.cv1 = Conv(2 * self.c, kernel_size=1)
+        self.cv2 = Conv(self.c2, kernel_size=1)
+        self.m = [Bottleneck(self.c, shortcut, kernel_size=((3, 3), (3, 3)), e=1.0)
+                  for _ in range(repeat)]
 
-    def call(self, x, training=None):
-        y = tf.split(self.cv1(x, training=training), num_or_size_splits=2, axis=-1) #split at channel axis
-        y.extend([m(y[-1], training=training) for m in self.m])
-        return self.cv2(tf.concat(y, axis=-1), training=training)
+    def call(self, x):
+        y = tf.split(self.cv1(x), num_or_size_splits=2, axis=-1) #channel axis
+        y.extend([m(y[-1]) for m in self.m])
+        return self.cv2(tf.concat(y, axis=-1))
 
-class SPPF(Layer):
+class SPPF(layers.Layer):
      # Spatial Pyramid Pooling - Fast (SPPF) layer for YOLOv5 by Glenn Jocher
     def __init__(self, c1, c2, k=5):  # equivalent to SPP(k=(5, 9, 13))
         super().__init__()
         c_ = c1 // 2  # hidden channels
         self.cv1 = Conv(c_, k=1,s=1,p='valid')
         self.cv2 = Conv(c2, k=1,s=1,p='valid')
-        self.m = tf.keras.layers.MaxPool2D(pool_size=k, strides=1, padding='same')
+        self.m = layers.MaxPool2D(pool_size=k, strides=1, padding='same')
 
     def call(self, x, training=None):
-        self.c1 = x.shape[-1] #the input channel
+        self.c1 = tf.shape(x)[-1] #the input channel
         x = self.cv1(x, training=training)
         y1 = self.m(x)
         y2 = self.m(y1)
         return self.cv2(tf.concat([x, y1, y2, self.m(y2)], axis=3), training=training)
 
-class DFL(Layer):
+class DFL(layers.Layer):
      #Integral module of Distribution Focal Loss (DFL) proposed in Generalized Focal Loss https://ieeexplore.ieee.org/document/9792391
     def __init__(self, c1=16):
         super().__init__()
         x = tf.range(c1, dtype=tf.float32)
         weights_ini = tf.reshape(x, (1, 1, c1, 1)) #weights initialization (kernel_h, kernel_w, in_ch, out_ch)
-        self.conv = tf.keras.layers.Conv2D(filters=1, kernel_size=1, use_bias=False, trainable=False, weights = [weights_ini])
+        self.conv = layers.Conv2D(filters=1, kernel_size=1, use_bias=False, trainable=False, weights = [weights_ini])
         self.c1 = c1
 
     def call(self, x):
-        b, a, c = x.shape   # batch, anchors, channels (1, 9600, 64)
+        b, c, a = x.shape   # batch, anchors, channels (1, 9600, 64)
+        #print("b, a, c:", b, a, c)
         x_reshaped = tf.reshape(x, (b, a, 4, self.c1)) #(batch, anchors, 4, c1)
         conv_output = self.conv(tf.nn.softmax(x_reshaped, axis=3))
         return tf.reshape(conv_output, (b, 4, a))
-        #return conv_output
-    
+
 def make_anchors(feats, strides, grid_cell_offset=0.5):
     """Generate anchors from features."""
     anchor_points = []
@@ -127,14 +141,12 @@ def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
         c_xy = (x1y1 + x2y2) / 2
         wh = x2y2 - x1y1
         return tf.concat((c_xy, wh), axis=dim)  # xywh bbox
-    #return tf.concat((x1y1, x2y2), axis=dim)  # xyxy bbox
-    return lt
+    return tf.concat((x1y1, x2y2), axis=dim)  # xyxy bbox
 
-class Detect(Layer):
+
+class Detect(layers.Layer):
     #YOLOv8 Detect head for detection models
     """Concatenates and returns predicted bounding boxes and class probabilities."""
-    dynamic = False  # force grid reconstruction
-    export = False  # export mode
     shape = None
     anchors = []
     strides = []
@@ -152,13 +164,19 @@ class Detect(Layer):
         self.cv2 = [tf.keras.Sequential([
             Conv(c2, k=3, s=1, p='same'),
             Conv(c2, k=3, s=1, p='same'),
-            tf.keras.layers.Conv2D(filters=(4*self.reg_max), kernel_size=1, strides=1, padding='valid')
+            layers.Conv2D(filters=(4*self.reg_max),
+                          kernel_size=1,
+                          strides=1,
+                          padding='valid')
         ]) for x in ch]
 
         self.cv3 = [tf.keras.Sequential([
             Conv(c3, k=3, s=1, p='same'),
             Conv(c3, k=3, s=1, p='same'),
-            tf.keras.layers.Conv2D(filters=self.nc, kernel_size=1, strides=1, padding='valid')
+            layers.Conv2D(filters=self.nc,
+                          kernel_size=1,
+                          strides=1,
+                          padding='valid')
         ]) for x in ch]
         
         if self.reg_max > 1:
@@ -168,43 +186,37 @@ class Detect(Layer):
                  
     def call(self, x, training=None):
         shape = x[0].shape  # BHWC
+
         #print("shape_x0:", shape)
         #print("shape_cv2:", self.cv2[0](x[0]))
         for i in range(self.nl):
             x[i] = tf.concat((self.cv2[i](x[i], training=training), self.cv3[i](x[i], training=training)), 3) #1, h, w, 144
         if training:
             return x
-        elif self.dynamic or self.shape != shape:
-            self.anchors, self.strides = (tf.transpose(x, perm=(1, 0)) for x in make_anchors(x, self.stride, 0.5))
+        elif self.shape != shape:
+            self.anchors, self.strides = (tf.transpose(_, perm=(1, 0)) for _ in make_anchors(x, self.stride, 0.5))
             self.shape = shape
-            
+        bs = shape[0]
+        
         concatenated_xi = []
         for xi in x:
-            xi_reshaped = tf.reshape(xi, (shape[0], -1, self.no))
+            xi_reshaped = tf.reshape(xi, (bs, self.no, -1))
             concatenated_xi.append(xi_reshaped)
-        concatenated_tensor = tf.concat(concatenated_xi, axis=1) #1, 8400, 144 /channel last
+        concatenated_tensor = tf.concat(concatenated_xi, axis=2) #1, 144, 8400 
         #print("concatenated_tensor+FT:", concatenated_tensor)
         
-        splits = tf.split(concatenated_tensor, (self.reg_max * 4, self.nc), axis=2) #[1, 8400, 64], [1, 8400, 80]
-        #print("Splits shapes:", [split.shape for split in splits])
+        splits = tf.split(concatenated_tensor, (self.reg_max * 4, self.nc), axis=1) #[1, 64, 8400], [1, 80, 8400]
         box, cls = splits
         dbox = dist2bbox(self.dfl(box), tf.expand_dims(self.anchors, axis=0), xywh=True, dim=1) * self.strides
-        dbox = tf.transpose(dbox, perm=[0, 2, 1])
-        y = tf.concat([dbox, tf.sigmoid(cls)], axis=2)
-        return y if self.export else (y, x)
-        
-    def bias_init(self):
-        m = self
-        for a, b, s in zip(m.cv2, m.cv3, m.stride):
-            a[-1].bias.assign(1.0)  # Initialize box bias to 1.0
-            b[-1].bias[:m.nc].assign(tf.math.log(5 / m.nc / (640 / s) ** 2))  # Initialize class bias
+        y = tf.concat([dbox, tf.sigmoid(cls)], axis=1)
+        return (y, x)
 
-class Proto(Layer):
+class Proto(layers.Layer):
     # YOLOv8 mask Proto module for segmentation models
     def __init__(self, c_=256, c2=32):# number of protos, number of masks
         super(Proto, self).__init__()
         self.cv1 = Conv(c_, k=3, s=1, p='same')
-        self.upsample = tf.keras.layers.Conv2DTranspose(filters=c_, kernel_size=2, strides=2, padding='valid')
+        self.upsample = layers.Conv2DTranspose(filters=c_, kernel_size=2, strides=2, padding='valid')
         self.cv2 = Conv(c_, k=3, s=1, p='same')
         self.cv3 = Conv(c2, k=1, s=1, p='valid')
 
@@ -227,39 +239,42 @@ class Segment(Detect):
         self.cv4 = [tf.keras.Sequential([
             Conv(c4, k=3, s=1, p='same'),
             Conv(c4, k=3, s=1, p='same'),
-            tf.keras.layers.Conv2D(filters=self.nm, kernel_size=1, strides=1, padding='valid')
+            tf.keras.layers.Conv2D(filters=self.nm,
+                                   kernel_size=1,
+                                   strides=1,
+                                   padding='valid')
         ]) for x in ch]
 
     def call(self, x, training=None):
         p = self.proto(x[0], training=training)  # mask protos
         bs = p.shape[0]  # batch size
-        if bs is None:
-            bs = 1
         mc_parts = []
         for i in range(self.nl):
         # Convolution and reshape operations
             conv_result = self.cv4[i](x[i], training=training)
-            reshaped_result = tf.reshape(conv_result, (bs, -1, self.nm))
+            reshaped_result = tf.reshape(conv_result, (bs, self.nm, -1))
         # Add the processed result to the list
             mc_parts.append(reshaped_result)
             
-        mc = tf.concat(mc_parts, axis = 1) # mask coefficients
+        mc = tf.concat(mc_parts, axis = 2) # mask coefficients
         x = self.detect(self, x, training=training)
-        print("export:", self.export)
         print("training:", training)
         if training:
            return x, mc, p
-        return (tf.concat([x, mc], axis=2), p) if self.export else (tf.concat([x[0], mc], axis=2), (x[1], mc, p))
+        return (tf.concat([x[0], mc], axis=2), (x[1], mc, p))
   
 class Yolov8Seg_Model(tf.keras.Model):
     #Yolov8 Segmentation Model, input channel must be a multiple of 32
+    #Including Segmentation head with encoding/post-processing methode
+    #Result should be
     #Base model structure based on https://arxiv.org/abs/2304.00501
-    def __init__(self, input_shape):
+    def __init__(self, input_shape, nc=4, training=None):
         super(Yolov8Seg_Model, self).__init__()
         # Backbone
         #self.inputs = tf.keras.layers.Input(shape=input_shape[1:], batch_size = input_shape[0])
-        
-        self.inputs = tf.keras.layers.Input(shape=input_shape)
+        self.nc = nc # number of classes
+        self.training = training
+        self.inputs = tf.keras.Input(shape=input_shape)
         self.cv1 = Conv(c2=64, k=3, s=2, p='same')  #p1
         self.cv2 = Conv(c2=128, k=3, s=2, p='same')  #p2
         self.c2f1 = C2f(c2=128, n=3, shortcut=True)
@@ -296,11 +311,29 @@ class Yolov8Seg_Model(tf.keras.Model):
         self.c2f7 = C2f(c2=512, n=3, shortcut=False) #p4 - c2=512 x w
         self.cv7 = Conv(c2=512, k=3, s=2, p='same')  #p4 - c2=512 x w
         self.c2f8 = C2f(c2=512, n=3, shortcut=False) #p5 - c2=512 x w x r
-        self.segment = lambda nc, ch: Segment(nc=nc, ch=ch)
+        self.segment_head = lambda nc, ch: Segment(nc=nc, ch=ch)
+        
+    def call(self, inputs): 
+        x1 = self.seq1(inputs, training=self.training)
+        x2 = self.seq2(x1, training=self.training)
+        x3 = self.seq3(x2, training=self.training)
+        # Head
+        x4 = self.c2f5(tf.concat([model.upsample(x3), x2], axis=3), training=self.training)
+        xs1 = self.c2f6(tf.concat([model.upsample(x4), x1], axis=3), training=self.training)
+        xs2 = self.c2f7(tf.concat([model.cv6(xs1, training=self.training), x4], axis=3), training=self.training)
+        xs3 = self.c2f8(tf.concat([model.cv7(xs2, training=self.training), x3], axis=3), training=self.training)
+        # Segmentation
+        ch = [xs1.shape[-1], xs2.shape[-1], xs3.shape[-1]]
+        seg_inputs = [xs1, xs2, xs3]
+        segment = self.segment_head(nc=self.nc, ch=ch)
+        outputs = segment(seg_inputs, training=self.training)
+        return outputs
+        
 
+        
 def Yolov8_Seg(input_shape, nc=80, training=None):
     model = Yolov8Seg_Model(input_shape)
-    #print("modelinput", model.inputs)
+    print("modelinput", tf.shape(model.inputs))
     x1 = model.seq1(model.inputs, training=training)
     x2 = model.seq2(x1, training=training)
     x3 = model.seq3(x2, training=training)
@@ -311,25 +344,25 @@ def Yolov8_Seg(input_shape, nc=80, training=None):
     xs3 = model.c2f8(tf.concat([model.cv7(xs2, training=training), x3], axis=3), training=training)
     # Segmentation
     ch = [xs1.shape[-1], xs2.shape[-1], xs3.shape[-1]]
-    seginputs = [xs1, xs2, xs3]
-    print("seginputs", seginputs)
     seg = model.segment(nc=nc, ch=ch)
-    outputs = seg(seginputs, training=training)
-
+    outputs = (xs1, xs2, xs3)
+    
     segment_model = tf.keras.models.Model(inputs=model.inputs, outputs=outputs, name='Yolov8-Segmentation')
     return segment_model
 
-if __name__ == "__main__":
-    input_shape = (640, 640, 1)
-    #input_tensor = tf.keras.layers.Input(shape=input_shape)
-    nclasses = 2
-    model = Yolov8_Seg(input_shape, nc=nclasses, training=True)
 
+    
+if __name__ == "__main__":
+    input_shape = (800, 800, 3)
+    #input_tensor = tf.keras.layers.Input(shape=input_shape)
+    nclasses = 4 
+    model = Yolov8Seg_Model(input_shape, nc=nclasses, training=False)
+    #img = tf.convert_to_tensor(np.expand_dim(np.zeros((1024, 1024)), axis=-1)) #-> output: 1024x1024x4
     # Print model summary
-    model.summary()
+    #model.summary()
 
     # Generate random input tensor
-    batch_size = 1
+    batch_size = 4
     input_tensor = tf.random.normal((batch_size,) + input_shape)
 
     # Pass input_tensor through the model
