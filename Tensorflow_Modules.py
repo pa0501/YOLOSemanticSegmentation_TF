@@ -53,9 +53,9 @@ class Bottleneck(layers.Layer):
                  e=0.5):
         super().__init__()
         self.c2 = output_channel
-        self.c1 = int(self.c2 * e)
-        self.cv1 = Conv(self.c1, kernel_size=k[0])
-        self.cv2 = Conv(self.c2, kernel_size=k[1])
+        self.c1 = int(output_channel=self.c2 * e)
+        self.cv1 = Conv(output_channel=self.c1, kernel_size=k[0])
+        self.cv2 = Conv(output_channel=self.c2, kernel_size=k[1])
         self.add = shortcut
         
     def call(self, x):
@@ -73,13 +73,18 @@ class C2f(layers.Layer):
         super().__init__()
         self.c2 = output_channel
         self.c = int(self.c2 * e) # hidden channels
-        self.cv1 = Conv(2 * self.c, kernel_size=1)
-        self.cv2 = Conv(self.c2, kernel_size=1)
-        self.m = [Bottleneck(self.c, shortcut, kernel_size=((3, 3), (3, 3)), e=1.0)
+        self.cv1 = Conv(output_channel=2*self.c, kernel_size=1)
+        self.cv2 = Conv(output_channel=self.c2, kernel_size=1)
+        self.m = [Bottleneck(self.c,
+                             shortcut,
+                             kernel_size=((3, 3), (3, 3)),
+                             e=1.0)
                   for _ in range(repeat)]
 
     def call(self, x):
-        y = tf.split(self.cv1(x), num_or_size_splits=2, axis=-1) #channel axis
+        y = tf.split(self.cv1(x),
+                     num_or_size_splits=2,
+                     axis=-1) #channel axis
         y.extend([m(y[-1]) for m in self.m])
         return self.cv2(tf.concat(y, axis=-1))
 
@@ -88,28 +93,28 @@ class SPPF(layers.Layer):
     def __init__(self, c1, c2, k=5):  # equivalent to SPP(k=(5, 9, 13))
         super().__init__()
         c_ = c1 // 2  # hidden channels
-        self.cv1 = Conv(c_, k=1,s=1,p='valid')
-        self.cv2 = Conv(c2, k=1,s=1,p='valid')
+        self.cv1 = Conv(output_channel=c_, kernel_size=1)
+        self.cv2 = Conv(output_channel=c2, kernel_size=1)
         self.m = layers.MaxPool2D(pool_size=k, strides=1, padding='same')
 
     def call(self, x, training=None):
         self.c1 = tf.shape(x)[-1] #the input channel
-        x = self.cv1(x, training=training)
+        x = self.cv1(x)
         y1 = self.m(x)
         y2 = self.m(y1)
-        return self.cv2(tf.concat([x, y1, y2, self.m(y2)], axis=3), training=training)
+        return self.cv2(tf.concat([x, y1, y2, self.m(y2)], axis=3))
 
 class DFL(layers.Layer):
      #Integral module of Distribution Focal Loss (DFL) proposed in Generalized Focal Loss https://ieeexplore.ieee.org/document/9792391
     def __init__(self, c1=16):
         super().__init__()
-        x = tf.range(c1, dtype=tf.float32)
-        weights_ini = tf.reshape(x, (1, 1, c1, 1)) #weights initialization (kernel_h, kernel_w, in_ch, out_ch)
-        self.conv = layers.Conv2D(filters=1, kernel_size=1, use_bias=False, trainable=False, weights = [weights_ini])
         self.c1 = c1
-
+        x = tf.range(c1, dtype=tf.float32)
+        weights_ini = tf.reshape(x, (1, 1, self.c1, 1)) #weights initialization (kernel_h, kernel_w, in_ch, out_ch)
+        self.conv = layers.Conv2D(filters=1, kernel_size=1, use_bias=False, trainable=False, weights = [weights_ini])
+        
     def call(self, x):
-        b, c, a = x.shape   # batch, anchors, channels (1, 9600, 64)
+        b, c, a = x.shape   # batch, channels, anchors (1, 9600, 64)
         #print("b, a, c:", b, a, c)
         x_reshaped = tf.reshape(x, (b, a, 4, self.c1)) #(batch, anchors, 4, c1)
         conv_output = self.conv(tf.nn.softmax(x_reshaped, axis=3))
@@ -123,8 +128,12 @@ def make_anchors(feats, strides, grid_cell_offset=0.5):
     dtype = feats[0].dtype
     for i, stride in enumerate(strides):
         _, h, w, _ = feats[i].shape
-        sx = tf.range(start=grid_cell_offset, limit=w + grid_cell_offset, dtype=dtype)  # shift x
-        sy = tf.range(start=grid_cell_offset, limit=h + grid_cell_offset, dtype=dtype)  # shift y
+        sx = tf.range(start=grid_cell_offset,
+                      limit=w + grid_cell_offset,
+                      dtype=dtype)  # shift x
+        sy = tf.range(start=grid_cell_offset,
+                      limit=h + grid_cell_offset,
+                      dtype=dtype)  # shift y
         sy, sx = tf.meshgrid(sy, sx, indexing='ij')
         stacked_points = tf.stack((sx, sy), axis=-1)
         anchor_points.append(tf.reshape(stacked_points, (-1, 2)))
@@ -162,35 +171,33 @@ class Detect(layers.Layer):
         c2, c3 = max((16, ch[0] // 4, self.reg_max * 4)), max(ch[0], self.nc)  # channels
 
         self.cv2 = [tf.keras.Sequential([
-            Conv(c2, k=3, s=1, p='same'),
-            Conv(c2, k=3, s=1, p='same'),
+            Conv(output_channel=c2, kernel_size=3),
+            Conv(output_channel=c2, kernel_size=3),
             layers.Conv2D(filters=(4*self.reg_max),
                           kernel_size=1,
                           strides=1,
                           padding='valid')
-        ]) for x in ch]
+        ]) for _ in ch]
 
         self.cv3 = [tf.keras.Sequential([
-            Conv(c3, k=3, s=1, p='same'),
-            Conv(c3, k=3, s=1, p='same'),
+            Conv(output_channel=c3, kernel_size=3),
+            Conv(output_channel=c3, kernel_size=3),
             layers.Conv2D(filters=self.nc,
                           kernel_size=1,
                           strides=1,
                           padding='valid')
-        ]) for x in ch]
+        ]) for _ in ch]
         
         if self.reg_max > 1:
             self.dfl = DFL(self.reg_max)
         else:
             self.dfl = tf.keras.layers.Identity()
                  
-    def call(self, x, training=None):
+    def call(self, x, training=False):
         shape = x[0].shape  # BHWC
 
-        #print("shape_x0:", shape)
-        #print("shape_cv2:", self.cv2[0](x[0]))
         for i in range(self.nl):
-            x[i] = tf.concat((self.cv2[i](x[i], training=training), self.cv3[i](x[i], training=training)), 3) #1, h, w, 144
+            x[i] = tf.concat((self.cv2[i](x[i]), self.cv3[i](x[i])), 3) #1, h, w, 144
         if training:
             return x
         elif self.shape != shape:
@@ -215,16 +222,16 @@ class Proto(layers.Layer):
     # YOLOv8 mask Proto module for segmentation models
     def __init__(self, c_=256, c2=32):# number of protos, number of masks
         super(Proto, self).__init__()
-        self.cv1 = Conv(c_, k=3, s=1, p='same')
+        self.cv1 = Conv(c_, kernel_size=3)
         self.upsample = layers.Conv2DTranspose(filters=c_, kernel_size=2, strides=2, padding='valid')
-        self.cv2 = Conv(c_, k=3, s=1, p='same')
-        self.cv3 = Conv(c2, k=1, s=1, p='valid')
+        self.cv2 = Conv(output_channel=c_, kernel_size=3)
+        self.cv3 = Conv(output_channel=c2, kernel_size=1)
 
-    def call(self, x, training=None):
-        x = self.cv1(x, training=training)
+    def call(self, x):
+        x = self.cv1(x)
         x = self.upsample(x)
-        x = self.cv2(x, training=training)
-        x = self.cv3(x, training=training)
+        x = self.cv2(x)
+        x = self.cv3(x)
         return x
 
 class Segment(Detect):
@@ -237,8 +244,8 @@ class Segment(Detect):
         
         c4 = max(ch[0] // 4, self.nm)
         self.cv4 = [tf.keras.Sequential([
-            Conv(c4, k=3, s=1, p='same'),
-            Conv(c4, k=3, s=1, p='same'),
+            Conv(output_channel=c4, kernel_size=3),
+            Conv(output_channel=c4, kernel_size=3),
             tf.keras.layers.Conv2D(filters=self.nm,
                                    kernel_size=1,
                                    strides=1,
