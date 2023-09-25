@@ -387,14 +387,16 @@ class Yolov8Seg_Model(tf.keras.Model):
     # Yolov8 Segmentation Model, input channel must be a multiple of 32
     # Including Segmentation head with encoding/post-processing methode
     # Base model structure based on https://arxiv.org/abs/2304.00501
-    def __init__(self, input_shape, nc=4):
+    def __init__(self, in_shape, nc=4):
         super(Yolov8Seg_Model, self).__init__()
         # Backbone
         # self.inputs = tf.keras.layers.Input(shape=input_shape[1:], batch_size = input_shape[0])
+        if in_shape[-1] <= 3:  # NHWC
+            in_shape = tf.transpose(in_shape, perm=[0, 3, 1, 2])  # NCHW
         self.nc = nc  # number of classes
-        self.shape_in = ()
+        self.in_shape = in_shape
         self.sigmoid = layers.Activation(tf.nn.sigmoid)
-        self.inputs = keras.Input(shape=self.shape)
+        self.inputs = keras.Input(shape=self.in_shape)
         self.cv1 = Conv(output_channel=64, kernel_size=3, strides=2)  # p1
         self.cv2 = Conv(output_channel=128, kernel_size=3, strides=2)  # p2
         self.c2f1 = C2f(output_channel=128, repeat=3, shortcut=True)
@@ -529,3 +531,22 @@ class Yolov8Seg_Model(tf.keras.Model):
 
         return tf.stack(final_masks, axis=0)
 
+
+if __name__ == "__main__":
+    if True:
+        input_shape = (800, 800, 3)
+        # input_tensor = tf.keras.layers.Input(shape=input_shape)
+        nclasses = 4
+        model = Yolov8Seg_Model(input_shape, nc=nclasses)
+        model.compile()
+        # img = tf.convert_to_tensor(np.expand_dim(np.zeros((1024, 1024)), axis=-1)) #-> output: 1024x1024x4
+        # Print model summary
+        # model.summary()
+
+        # Generate random input tensor
+        batch_size = 4
+        input_tensor = tf.random.normal((batch_size,) + input_shape)
+
+        # Pass input_tensor through the model
+        output = model(input_tensor)
+        print(output)
