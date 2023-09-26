@@ -387,16 +387,17 @@ class Yolov8Seg_Model(tf.keras.Model):
     # Yolov8 Segmentation Model, input channel must be a multiple of 32
     # Including Segmentation head with encoding/post-processing methode
     # Base model structure based on https://arxiv.org/abs/2304.00501
-    def __init__(self, in_shape, nc=4):
+    def __init__(self, shape_in, nc=4):
         super(Yolov8Seg_Model, self).__init__()
         # Backbone
         # self.inputs = tf.keras.layers.Input(shape=input_shape[1:], batch_size = input_shape[0])
-        if in_shape[-1] <= 3:  # NHWC
-            in_shape = tf.transpose(in_shape, perm=[0, 3, 1, 2])  # NCHW
+        self.shape_in = shape_in
+        if shape_in[-1] <= 3:  # NHWC
+            shape_in = tf.transpose(shape_in, perm=[0, 3, 1, 2])  # NCHW
+        self.shape_in = shape_in
         self.nc = nc  # number of classes
-        self.in_shape = in_shape
         self.sigmoid = layers.Activation(tf.nn.sigmoid)
-        self.inputs = keras.Input(shape=self.in_shape)
+        self.inputs = keras.Input(shape=self.shape_in)
         self.cv1 = Conv(output_channel=64, kernel_size=3, strides=2)  # p1
         self.cv2 = Conv(output_channel=128, kernel_size=3, strides=2)  # p2
         self.c2f1 = C2f(output_channel=128, repeat=3, shortcut=True)
