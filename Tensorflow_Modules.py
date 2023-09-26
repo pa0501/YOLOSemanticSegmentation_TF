@@ -390,8 +390,6 @@ class Yolov8Seg_Model(tf.keras.Model):
     def __init__(self, shape_in, nc=4):
         super(Yolov8Seg_Model, self).__init__()
         # Backbone
-        # self.inputs = tf.keras.layers.Input(shape=input_shape[1:], batch_size = input_shape[0])
-        self.shape_in = shape_in
         if shape_in[-1] <= 3:  # NHWC
             shape_in = tf.transpose(shape_in, perm=[0, 3, 1, 2])  # NCHW
         self.shape_in = shape_in
