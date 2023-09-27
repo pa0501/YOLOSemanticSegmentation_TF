@@ -228,7 +228,8 @@ class Detect(layers.Layer):
         self.nl = len(ch)  # number of detection layers
         self.reg_max = 16  # DFL channels (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x model)
         self.no = nc + self.reg_max * 4  # number of outputs per anchor
-        self.stride = tf.Variable(initial_value=tf.zeros(self.nl))  # strides computed during build
+        self.stride = (8, 16, 32)  # values only for model l
+        #  self.stride = tf.Variable(initial_value=tf.zeros(self.nl))  # strides computed during build
 
         c2, c3 = max((16, ch[0] // 4, self.reg_max * 4)), max(ch[0], self.nc)  # channels
 
@@ -270,8 +271,10 @@ class Detect(layers.Layer):
         for i in range(self.nl):
             x[i] = tf.concat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)  # 1, 144, h, w
 
-        self.anchors, self.strides = (tf.transpose(x, perm=(1, 0)) for _ in make_anchors(x, self.stride, 0.5))
-
+        if self.shape != shape:
+            self.anchors, self.strides = (tf.transpose(x, perm=(1, 0)) for _ in make_anchors(x, self.stride, 0.5))
+            self.shape = shape
+            
         concatenated_xi = []
         for xi in x:
             xi_reshaped = tf.reshape(xi, (shape[0], self.no, -1))
