@@ -461,8 +461,7 @@ class Yolov8Seg_Model(tf.keras.Model):
         return mask, (x1, y1, x2, y2)  #  int
 
     def call(self, inputs):
-        if inputs.shape[-1] <= 3:  # NHWC
-            inputs = tf.transpose(inputs, perm=[0, 3, 1, 2])  # NCHW
+        inputs = tf.transpose(inputs, perm=[0, 3, 1, 2])  # NCHW
 
         self.shape_in = inputs.shape
         x1 = self.seq1(inputs)
