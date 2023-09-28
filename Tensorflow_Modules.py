@@ -383,7 +383,7 @@ def iou(box1, box2):
     return intersection(box1, box2) / union(box1, box2)
 
 
-class_label = ["small rock", "big rock", "ground", "sky"]
+class_label = ["small rock", "big rock"]
 
 
 class Yolov8Seg_Model(tf.keras.Model):
@@ -487,7 +487,7 @@ class Yolov8Seg_Model(tf.keras.Model):
         output0 = outputs[0]
         output1 = outputs[1]
 
-        final_mask = np.zeros((self.shape_in[2], self.shape_in[3], self.nc), dtype=np.uint8)
+        final_mask = tf.zeros((self.shape_in[2], self.shape_in[3], self.nc), dtype=np.uint8)
         final_masks = []
         # for each image in batch
         for detect, segment in zip(output0, output1):
@@ -507,7 +507,7 @@ class Yolov8Seg_Model(tf.keras.Model):
             objects = []
             for row in boxes:
                 prob = tf.reduce_max(row[4:mi])
-                if prob < 0.5:
+                if prob < 0.4:
                     continue
                 class_id = tf.argmax(row[4:mi])  # get index of class with best probability
                 x1, y1, x2, y2 = row[:4]
@@ -520,27 +520,29 @@ class Yolov8Seg_Model(tf.keras.Model):
             while len(objects) > 0:
                 filtered_objects.append(objects[0])
                 objects = [box for box in objects if iou(box, objects[0]) < 0.7]
-
+            
             # convert the object mask with coordinates and class id into a single mask
-            final_mask = np.zeros((self.shape_in[2], self.shape_in[3], self.nc), dtype=np.uint8)
+            final_mask = tf.zeros((self.shape_in[2], self.shape_in[3], self.nc), dtype=np.uint8)
             for obj in filtered_objects:
                 mask = obj[6][0]
                 x1, y1, x2, y2 = obj[6][1]
-                class_id = obj[4]
+                class_id = tf.one_hot(obj[4], self.nc)
                 final_mask[y1:y2, x1:x2, -1] = tf.where(mask > 0, class_id, 0)
-
+            
+        
         final_masks.append(final_mask)  # stack of masks in all batches
-
+        
         return tf.stack(final_masks, axis=0)
 
 
 if __name__ == "__main__":
     if True:
-        input_shape = (800, 800, 3)
+        input_shape = (800, 800, 1)
         # input_tensor = tf.keras.layers.Input(shape=input_shape)
         nclasses = 4
         model = Yolov8Seg_Model(input_shape, nc=nclasses)
         model.compile()
+        model.fit()
         # img = tf.convert_to_tensor(np.expand_dim(np.zeros((1024, 1024)), axis=-1)) #-> output: 1024x1024x4
         # Print model summary
         # model.summary()
