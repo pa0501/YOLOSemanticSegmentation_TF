@@ -385,7 +385,6 @@ def iou(box1, box2):
 
 class_label = ["small rock", "big rock"]
 
-
 class Yolov8Seg_Model(tf.keras.Model):
     # Yolov8 Segmentation Model, input channel must be a multiple of 32
     # Including Segmentation head with encoding/post-processing methode
@@ -393,8 +392,6 @@ class Yolov8Seg_Model(tf.keras.Model):
     def __init__(self, shape_in, nc=4):
         super(Yolov8Seg_Model, self).__init__()
         # Backbone
-        if shape_in[-1] <= 3:  # NHWC
-            shape_in = tf.transpose(shape_in, perm=[0, 3, 1, 2])  # NCHW
         self.shape_in = shape_in
         self.nc = nc  # number of classes
         self.sigmoid = layers.Activation(tf.nn.sigmoid)
