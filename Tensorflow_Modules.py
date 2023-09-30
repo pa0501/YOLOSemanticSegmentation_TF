@@ -39,7 +39,7 @@ class Conv(layers.Layer):
 
     def call(self, x):
         if self.kernel_size > 1:
-            x = layers.ZeroPadding2D(padding=self.kernel_size // 2)(x)
+            x = layers.ZeroPadding2D(padding=self.kernel_size // 2, data_format="channels_first")(x)
 
         x = self.bn(self.conv(x))
         x = layers.Activation(self.activation)(x)
