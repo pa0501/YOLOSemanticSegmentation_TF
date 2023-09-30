@@ -38,8 +38,10 @@ class Conv(layers.Layer):
         return config
 
     def call(self, x):
-        if self.kernel_size > 1:
+        if isinstance(self.kernel_size, int) and self.kernel_size > 1:
             x = layers.ZeroPadding2D(padding=self.kernel_size // 2, data_format="channels_first")(x)
+        elif isinstance(self.kernel_size, tuple) and all(val > 1 for val in self.kernel_size):
+            x = layers.ZeroPadding2D(padding=self.kernel_size[0] // 2, data_format="channels_first")(x)
 
         x = self.bn(self.conv(x))
         x = layers.Activation(self.activation)(x)
