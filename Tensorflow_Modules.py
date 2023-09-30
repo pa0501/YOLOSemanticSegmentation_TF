@@ -173,6 +173,7 @@ class DFL(layers.Layer):
             kernel_size=1,
             use_bias=False,
             trainable=False,
+            data_format='channels_first',
             weights=[weights_ini])
 
     def call(self, x):
@@ -238,14 +239,16 @@ class Detect(layers.Layer):
             Conv(output_channel=c2, kernel_size=3),
             Conv(output_channel=c2, kernel_size=3),
             layers.Conv2D(filters=(4 * self.reg_max),
-                          kernel_size=1)
+                          kernel_size=1,
+                          data_format='channels_first')
         ]) for _ in ch]
 
         self.cv3 = [tf.keras.Sequential([
             Conv(output_channel=c3, kernel_size=3),
             Conv(output_channel=c3, kernel_size=3),
             layers.Conv2D(filters=self.nc,
-                          kernel_size=1)
+                          kernel_size=1,
+                          data_format='channels_first')
         ]) for _ in ch]
 
         if self.reg_max > 1:
@@ -296,7 +299,7 @@ class Proto(layers.Layer):
         self.c_ = c_
         self.c2 = c2
         self.cv1 = Conv(self.c_, kernel_size=3)
-        self.upsample = layers.Conv2DTranspose(filters=self.c_, kernel_size=2, strides=2, use_bias=True)
+        self.upsample = layers.Conv2DTranspose(filters=self.c_, kernel_size=2, strides=2, data_format='channels_first', use_bias=True)
         self.cv2 = Conv(output_channel=self.c_, kernel_size=3)
         self.cv3 = Conv(output_channel=self.c2, kernel_size=1)
 
@@ -333,7 +336,8 @@ class Segment(Detect):
             Conv(output_channel=c4, kernel_size=3),
             Conv(output_channel=c4, kernel_size=3),
             tf.keras.layers.Conv2D(filters=self.nm,
-                                   kernel_size=1)
+                                   kernel_size=1,
+                                   data_format='channels_first')
         ]) for x in ch]
 
     def get_config(self):
@@ -426,7 +430,7 @@ class YOLOv8Seg_BaseModel(tf.keras.Model):
             self.sppf
         ])
         # Head
-        self.upsample = layers.UpSampling2D(size=2, interpolation='bilinear')
+        self.upsample = layers.UpSampling2D(size=2, data_format='channels_first', interpolation='bilinear')
         # self.upsample = lambda x: tf.image.resize(x, (x.shape[1] * 2, x.shape[2] * 2), method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
         self.c2f5 = C2f(output_channel=512, repeat=3, shortcut=False)  # - c2=512 x w
         self.c2f6 = C2f(output_channel=256, repeat=3, shortcut=False)  # p3
