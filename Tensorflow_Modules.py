@@ -363,8 +363,6 @@ class Segment(Detect):
     def call(self, x):
         p = self.proto(x[0])  # mask protos
         bs = tf.shape(p)[0] # batch size
-        if bs is None:
-            bs = 1
         mc_parts = []
         for i in range(self.nl):
             conv_result = self.cv4[i](x[i])
