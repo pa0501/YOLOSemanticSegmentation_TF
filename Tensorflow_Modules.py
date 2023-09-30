@@ -469,6 +469,7 @@ class YOLOv8Seg_BaseModel(tf.keras.Model):
 def Yolov8_Seg(input_shape, nc=4):
     m = YOLOv8Seg_BaseModel(input_shape, nc=nc)
     inputs = m.inputs
+    inputs = tf.transpose(inputs, perm=[0, 3, 1, 2])  # If input format is channel_last, comment this line out
     x1 = m.seq1(inputs)
     x2 = m.seq2(x1)
     x3 = m.seq3(x2)
