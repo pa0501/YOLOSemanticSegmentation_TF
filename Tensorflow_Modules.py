@@ -12,17 +12,19 @@ class Conv(layers.Layer):
             output_channel,
             kernel_size=1,
             strides=1,
+            padding="same",
             activation="swish"):
         super().__init__()
+        self.output_channel = output_channel
         self.kernel_size = kernel_size
         self.activation = activation
         self.strides = strides
-        self.activation = activation
+        self.padding = padding
         self.conv = layers.Conv2D(
-            filters=output_channel,
-            kernel_size=kernel_size,
-            strides=strides,
-            padding="valid",
+            filters=self.output_channel,
+            kernel_size=self.kernel_size,
+            strides=self.strides,
+            padding=self.padding,
             data_format='channels_first',
             use_bias=False)
         self.bn = layers.BatchNormalization()
@@ -33,17 +35,16 @@ class Conv(layers.Layer):
             "output_channel": self.output_channel,
             "kernel_size": self.kernel_size,
             "strides": self.strides,
-            "activation": self.activation
+            "padding": self.padding,
+            "activation": self.activation,
+            "convolution": self.conv,
+            "batchnormalization": self.bn
         })
         return config
 
     def call(self, x):
-        if isinstance(self.kernel_size, int) and self.kernel_size > 1:
-            x = layers.ZeroPadding2D(padding=self.kernel_size // 2, data_format="channels_first")(x)
-        elif isinstance(self.kernel_size, tuple) and all(val > 1 for val in self.kernel_size):
-            x = layers.ZeroPadding2D(padding=self.kernel_size[0] // 2, data_format="channels_first")(x)
-
-        x = self.bn(self.conv(x))
+        x = self.conv(x)
+        x = self.bn(x)
         x = layers.Activation(self.activation)(x)
         return x
 
@@ -282,8 +283,12 @@ class Detect(layers.Layer):
             self.shape = shape
 
         concatenated_xi = []
+        if shape[0] is None:
+            bs = 1
+        else:
+            bs = shape[0]
         for xi in x:
-            xi_reshaped = tf.reshape(xi, (shape[0], self.no, -1))
+            xi_reshaped = tf.reshape(xi, (bs, self.no, -1))
             concatenated_xi.append(xi_reshaped)
         concatenated_tensor = tf.concat(concatenated_xi, axis=2)  # 1, 144, 8400
 
@@ -301,7 +306,12 @@ class Proto(layers.Layer):
         self.c_ = c_
         self.c2 = c2
         self.cv1 = Conv(self.c_, kernel_size=3)
-        self.upsample = layers.Conv2DTranspose(filters=self.c_, kernel_size=2, strides=2, data_format='channels_first', use_bias=True)
+        self.upsample = layers.Conv2DTranspose(filters=self.c_,
+                                               kernel_size=2,
+                                               strides=2,
+                                               padding='valid',
+                                               data_format='channels_first',
+                                               use_bias=True)
         self.cv2 = Conv(output_channel=self.c_, kernel_size=3)
         self.cv3 = Conv(output_channel=self.c2, kernel_size=1)
 
@@ -356,6 +366,8 @@ class Segment(Detect):
     def call(self, x):
         p = self.proto(x[0])  # mask protos
         bs = p.shape[0]  # batch size
+        if bs is None:
+            bs = 1
         mc_parts = []
         for i in range(self.nl):
             conv_result = self.cv4[i](x[i])
@@ -400,7 +412,7 @@ class YOLOv8Seg_BaseModel(tf.keras.Model):
     def __init__(self, shape_in, nc=4):
         super(YOLOv8Seg_BaseModel, self).__init__()
         # Backbone
-        self.shape_in = shape_in   # NCHW
+        self.shape_in = shape_in  # NCHW
         self.nc = nc  # number of classes
         self.sigmoid = layers.Activation(tf.nn.sigmoid)
         self.inputs = keras.Input(shape=self.shape_in)
@@ -468,10 +480,11 @@ class YOLOv8Seg_BaseModel(tf.keras.Model):
         mask = np.array(img_mask)
         return mask, (x1, y1, x2, y2)  # int
 
+
 def Yolov8_Seg(input_shape, nc=4):
     m = YOLOv8Seg_BaseModel(input_shape, nc=nc)
     inputs = m.inputs
-    inputs = tf.transpose(inputs, perm=[0, 3, 1, 2])  # If input format is channel_last, comment this line out
+    inputs = tf.transpose(inputs, perm=[0, 3, 1, 2])  # If input format is channel_last, comment this line
     x1 = m.seq1(inputs)
     x2 = m.seq2(x1)
     x3 = m.seq3(x2)
@@ -546,7 +559,7 @@ if __name__ == "__main__":
         nclasses = 4
         model = Yolov8_Seg(input_shape, nc=nclasses)
         model.summary()
-        #model.fit()
+        # model.fit()
         # img = tf.convert_to_tensor(np.expand_dim(np.zeros((1024, 1024)), axis=-1)) #-> output: 1024x1024x4
         # Print model summary
         # model.summary()
