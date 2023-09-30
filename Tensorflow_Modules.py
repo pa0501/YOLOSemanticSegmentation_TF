@@ -283,10 +283,7 @@ class Detect(layers.Layer):
             self.shape = shape
 
         concatenated_xi = []
-        if shape[0] is None:
-            bs = 1
-        else:
-            bs = shape[0]
+        bs = tf.shape(shape)[0]
         for xi in x:
             xi_reshaped = tf.reshape(xi, (bs, self.no, -1))
             concatenated_xi.append(xi_reshaped)
@@ -365,7 +362,7 @@ class Segment(Detect):
 
     def call(self, x):
         p = self.proto(x[0])  # mask protos
-        bs = p.shape[0]  # batch size
+        bs = tf.shape(p)[0] # batch size
         if bs is None:
             bs = 1
         mc_parts = []
