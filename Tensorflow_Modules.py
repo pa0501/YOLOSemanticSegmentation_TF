@@ -170,7 +170,7 @@ class DFL(layers.Layer):
         super().__init__()
         self.c1 = c1
         x = tf.range(self.c1, dtype=tf.float32)
-        weights_ini = tf.reshape(x, (1, self.c1, 1, 1))
+        weights_ini = tf.reshape(x, (1, 1, self.c1, 1))
         self.conv = layers.Conv2D(
             filters=1,
             kernel_size=1,
