@@ -479,6 +479,8 @@ class YOLOv8Seg_BaseModel(tf.keras.Model):
 
 def Yolov8_Seg(input_shape, nc=4):
     m = YOLOv8Seg_BaseModel(input_shape, nc=nc)
+    img_height = max(input_shape)
+    img_width = max(input_shape)
     inputs = m.inputs
     inputs = tf.transpose(inputs, perm=[0, 3, 1, 2])  # If input format is channel_last, comment this line
     x1 = m.seq1(inputs)
@@ -500,7 +502,7 @@ def Yolov8_Seg(input_shape, nc=4):
     output0 = outputs[0]
     output1 = outputs[1]
 
-    final_mask = tf.zeros((m.shape_in[2], m.shape_in[3], m.nc), dtype=np.uint8)
+    final_mask = tf.zeros((img_height, img_width, m.nc), dtype=np.uint8)
     final_masks = []
     # for each image in batch
     for detect, segment in zip(output0, output1):
@@ -524,7 +526,7 @@ def Yolov8_Seg(input_shape, nc=4):
                 continue
             class_id = tf.argmax(row[4:mi])  # get index of class with best probability
             x1, y1, x2, y2 = row[:4]
-            mask = model.get_mask(row[mi:], (x1, y1, x2, y2))
+            mask = m.get_mask(row[mi:], (x1, y1, x2, y2))
             objects.append([x1, y1, x2, y2, class_id, prob, mask])
 
         # filter overlapped boxes with non-maximum suppression
@@ -535,7 +537,7 @@ def Yolov8_Seg(input_shape, nc=4):
             objects = [box for box in objects if iou(box, objects[0]) < 0.7]
 
         # convert the object mask with coordinates and class id into a single mask
-        final_mask = tf.zeros((m.shape_in[2], m.shape_in[3], m.nc), dtype=np.uint8)
+        final_mask = tf.zeros((img_height, img_width, m.nc), dtype=np.uint8)
         for obj in filtered_objects:
             mask = obj[6][0]
             x1, y1, x2, y2 = obj[6][1]
