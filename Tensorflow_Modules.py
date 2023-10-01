@@ -180,7 +180,8 @@ class DFL(layers.Layer):
             weights=[weights_ini])
 
     def call(self, x):
-        b, c, a = x.shape  # batch, channels, anchors
+        b = tf.shape(x)[0]  # batch
+        a = tf.shape(x)[2]  # anchors
         x = tf.reshape(x, (b, 4, self.c1, a))
         x = tf.transpose(x, perm=[0, 2, 1, 3])
         conv_output = self.conv(tf.nn.softmax(x, axis=1))
