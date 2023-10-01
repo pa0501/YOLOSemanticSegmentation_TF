@@ -501,11 +501,13 @@ def Yolov8_Seg(input_shape, nc=4):
 
     output0 = outputs[0]
     output1 = outputs[1]
-
+    dataset = tf.data.Dataset.from_tensor_slices((output0, output1))
+    
     final_mask = tf.zeros((img_height, img_width, m.nc), dtype=np.uint8)
     final_masks = []
     # for each image in batch
-    for detect, segment in zip(output0, output1):
+    # for detect, segment in zip(output0, output1):
+    for detect, segment in dataset:
         detect = detect.transpose(1, 0)
 
         mi = 4 + m.nc  # Mask start index
