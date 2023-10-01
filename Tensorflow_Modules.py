@@ -283,7 +283,7 @@ class Detect(layers.Layer):
             self.shape = shape
 
         concatenated_xi = []
-        bs = tf.shape(shape)[0]
+        bs = tf.shape(x[0])[0]
         for xi in x:
             xi_reshaped = tf.reshape(xi, (bs, self.no, -1))
             concatenated_xi.append(xi_reshaped)
