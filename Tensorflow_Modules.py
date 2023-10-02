@@ -552,7 +552,7 @@ def Yolov8_Seg(input_shape, nc=4):
 
     input_fn = seg_outputs + (img_shape,)
     # post-processing for each image in batch
-    outputs = tf.map_fn(post_process, input_fn, fn_output_signature=tf.TensorSpec(dtype=tf.float32))
+    outputs = tf.map_fn(post_process, input_fn, fn_output_signature=tf.TensorSpec(shape=(img_hw, img_hw, nc),dtype=tf.float32))
 
     yolo_model = keras.Model(inputs=inputs, outputs=outputs, name='YOLOv8-Seg')
     return yolo_model
