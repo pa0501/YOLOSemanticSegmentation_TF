@@ -42,7 +42,7 @@ class Conv(layers.Layer):
         })
         return config
 
-    def call(self, x,):
+    def call(self, x, ):
         x = self.conv(x)
         x = self.bn(x)
         x = layers.Activation(self.activation)(x)
@@ -479,9 +479,7 @@ def get_mask(img_shape, mask, box):
 
 
 def post_process(x):
-    detect = x[0]
-    segment = x[1]
-    img_shape = x[2]
+    detect, segment, img_shape = x
     nc = img_shape[3]
     img_height = max(img_shape)
     img_width = max(img_shape)
@@ -530,6 +528,14 @@ def post_process(x):
     return outputs
 
 
+class MapLayer(layers.Layer):
+    def call(self, input, img_shape):
+        return tf.map_fn(post_process,
+                         input,
+                         fn_output_signature=tf.TensorSpec(shape=(img_shape[0], img_shape[1], img_shape[2]),
+                                                           dtype=tf.float32))
+
+
 def Yolov8_Seg(input_shape, nc=4):
     m = YOLOv8Seg_BaseModel(input_shape, nc=nc)
     img_hw = max(input_shape)
@@ -550,9 +556,8 @@ def Yolov8_Seg(input_shape, nc=4):
     # segment = m.segment_head(nc=self.nc, ch=ch)
     seg_outputs = m.segment_head(seg_inputs)
 
-    input_fn = seg_outputs + (img_shape,)
     # post-processing for each image in batch
-    outputs = tf.map_fn(post_process, input_fn, fn_output_signature=tf.TensorSpec(shape=(img_hw, img_hw, nc),dtype=tf.float32))
+    outputs = MapLayer()(seg_outputs, img_shape)
 
     yolo_model = keras.Model(inputs=inputs, outputs=outputs, name='YOLOv8-Seg')
     return yolo_model
