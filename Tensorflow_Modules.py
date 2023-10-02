@@ -42,7 +42,7 @@ class Conv(layers.Layer):
         })
         return config
 
-    def call(self, x):
+    def call(self, x, *args):
         x = self.conv(x)
         x = self.bn(x)
         x = layers.Activation(self.activation)(x)
@@ -182,6 +182,7 @@ class DFL(layers.Layer):
     def call(self, x):
         b = tf.shape(x)[0]  # batch
         a = tf.shape(x)[2]  # anchors
+
         x = tf.reshape(x, (b, 4, self.c1, a))
         x = tf.transpose(x, perm=[0, 2, 1, 3])
         conv_output = self.conv(tf.nn.softmax(x, axis=1))
@@ -234,7 +235,7 @@ class Detect(layers.Layer):
         self.nl = len(ch)  # number of detection layers
         self.reg_max = 16  # DFL channels (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x model)
         self.no = nc + self.reg_max * 4  # number of outputs per anchor
-        self.stride = (8.0, 16.0, 32.0)  # values only for model l
+        self.stride = (8, 16, 32)  # values only for model l
         #  self.stride = tf.Variable(initial_value=tf.zeros(self.nl))  # strides computed during build
 
         c2, c3 = max((16, ch[0] // 4, self.reg_max * 4)), max(ch[0], self.nc)  # channels
@@ -280,11 +281,11 @@ class Detect(layers.Layer):
             x[i] = tf.concat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)  # 1, 144, h, w
 
         if self.shape != shape:
-            self.anchors, self.strides = (tf.transpose(_, perm=(1, 0)) for _ in make_anchors(x, self.stride, 0.5))
+            self.anchors, self.strides = (tf.transpose(x, perm=(1, 0)) for x in make_anchors(x, self.stride, 0.5))
             self.shape = shape
 
         concatenated_xi = []
-        bs = tf.shape(x[0])[0]
+        bs = tf.shape(shape)[0]
         for xi in x:
             xi_reshaped = tf.reshape(xi, (bs, self.no, -1))
             concatenated_xi.append(xi_reshaped)
@@ -363,7 +364,7 @@ class Segment(Detect):
 
     def call(self, x):
         p = self.proto(x[0])  # mask protos
-        bs = tf.shape(p)[0] # batch size
+        bs = tf.shape(p)[0]  # batch size
         mc_parts = []
         for i in range(self.nl):
             conv_result = self.cv4[i](x[i])
@@ -410,7 +411,6 @@ class YOLOv8Seg_BaseModel(tf.keras.Model):
         # Backbone
         self.shape_in = shape_in  # NCHW
         self.nc = nc  # number of classes
-        self.sigmoid = layers.Activation(tf.nn.sigmoid)
         self.inputs = keras.Input(shape=self.shape_in)
         self.cv1 = Conv(output_channel=64, kernel_size=3, strides=2)  # p1
         self.cv2 = Conv(output_channel=128, kernel_size=3, strides=2)  # p2
@@ -450,37 +450,90 @@ class YOLOv8Seg_BaseModel(tf.keras.Model):
         self.c2f8 = C2f(output_channel=512, repeat=3, shortcut=False)  # p5 - c2=512 x w x r
         self.segment_head = Segment(nc=nc, ch=[256, 512, 512])
 
-    def get_mask(self, mask, box):
-        img_width = self.input_shape[2]
-        img_height = self.input_shape[3]
-        mask = tf.reshape(mask, (img_width // 4, img_height // 4))
-        mask = self.sigmoid(mask)
-        # mask = (mask > 0.5).astype('uint8') * 255  (if mask is numpy)
-        mask = tf.cast(mask > 0.5, tf.uint8) * 255  # background = 0 (black), object = 255 (white)
 
-        #  crop the mask
-        x1, y1, x2, y2 = box  # float
-        x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-        mask_x1 = x1 // 4
-        mask_y1 = y1 // 4
-        mask_x2 = x2 // 4
-        mask_y2 = y2 // 4
-        mask = mask[mask_y1:mask_y2, mask_x1:mask_x2]
+def get_mask(img_shape, mask, box):
+    img_height = max(img_shape)
+    img_width = max(img_shape)
+    mask = tf.reshape(mask, (img_width // 4, img_height // 4))
+    mask = tf.sigmoid(mask)
+    # mask = (mask > 0.5).astype('uint8') * 255  (if mask is numpy)
+    mask = tf.cast(mask > 0.5, tf.uint8) * 255  # background = 0 (black), object = 255 (white)
 
-        # resize the cropped mask
-        target_width = tf.abs(x2 - x1)
-        target_height = tf.abs(y2 - y1)
+    #  crop the mask
+    x1, y1, x2, y2 = box  # float
+    x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+    mask_x1 = x1 // 4
+    mask_y1 = y1 // 4
+    mask_x2 = x2 // 4
+    mask_y2 = y2 // 4
+    mask = mask[mask_y1:mask_y2, mask_x1:mask_x2]
 
-        img_mask = Image.fromarray(mask.numpy(), "L")
-        img_mask = img_mask.resize((target_width, target_height), Image.BILINEAR)
-        mask = np.array(img_mask)
-        return mask, (x1, y1, x2, y2)  # int
+    # resize the cropped mask
+    target_width = tf.abs(x2 - x1)
+    target_height = tf.abs(y2 - y1)
+
+    img_mask = Image.fromarray(mask.numpy(), "L")
+    img_mask = img_mask.resize((target_width, target_height), Image.BILINEAR)
+    mask = np.array(img_mask)
+    return mask, (x1, y1, x2, y2)  # int
+
+
+def post_process(x):
+    detect = x[0]
+    segment = x[1]
+    img_shape = x[2]
+    nc = img_shape[3]
+    img_height = max(img_shape)
+    img_width = max(img_shape)
+
+    detect = detect.transpose(1, 0)
+
+    mi = 4 + nc  # Mask start index
+    nm = segment.shape[0]  # Number of masks
+
+    boxes = detect[:, :mi]
+    masks = detect[:, mi:]
+    segment_reshaped = segment.reshape(nm, -1)
+    masks = masks @ segment_reshaped  # parse mask from segment with index from detect head
+    boxes = tf.concat((boxes, masks), axis=1)
+    # for each box: 0-4:xyxy, 4-(4+nc): class probabilities, (4+nc)- pixels of segmentation mask (as a single row)
+
+    final_masks = []
+    # filter each detected object based on their class probability
+    objects = []
+    for row in boxes:
+        prob = tf.reduce_max(row[4:mi])
+        if prob < 0.4:
+            continue
+        class_id = tf.argmax(row[4:mi])  # get index of class with best probability
+        x1, y1, x2, y2 = row[:4]
+        mask = get_mask(input_shape, row[mi:], (x1, y1, x2, y2))
+        objects.append([x1, y1, x2, y2, class_id, prob, mask])
+
+    # filter overlapped boxes with non-maximum suppression
+    objects.sort(key=lambda x: x[5], reverse=True)
+    filtered_objects = []
+    while len(objects) > 0:
+        filtered_objects.append(objects[0])
+        objects = [box for box in objects if iou(box, objects[0]) < 0.7]
+
+    # convert the object mask with coordinates and class id into a single mask
+    final_mask = tf.zeros((img_height, img_width, nc), dtype=np.uint8)
+    for obj in filtered_objects:
+        mask = obj[6][0]
+        x1, y1, x2, y2 = obj[6][1]
+        class_id = tf.one_hot(obj[4], nc)
+        final_mask[y1:y2, x1:x2, -1] = tf.where(mask > 0, class_id, 0)
+
+    final_masks.append(final_mask)  # stack of masks in all batches
+    outputs = tf.stack(final_masks, axis=0)
+    return outputs
 
 
 def Yolov8_Seg(input_shape, nc=4):
     m = YOLOv8Seg_BaseModel(input_shape, nc=nc)
-    img_height = max(input_shape)
-    img_width = max(input_shape)
+    img_hw = max(input_shape)
+    img_shape = (img_hw, img_hw, nc)
     inputs = m.inputs
     inputs = tf.transpose(inputs, perm=[0, 3, 1, 2])  # If input format is channel_last, comment this line
     x1 = m.seq1(inputs)
@@ -495,59 +548,12 @@ def Yolov8_Seg(input_shape, nc=4):
     # ch = [xs1.shape[1], xs2.shape[1], xs3.shape[1]]
     seg_inputs = [xs1, xs2, xs3]
     # segment = m.segment_head(nc=self.nc, ch=ch)
-    outputs = m.segment_head(seg_inputs)
+    seg_outputs = m.segment_head(seg_inputs)
 
-    # post-process
+    input_fn = seg_outputs + (img_shape,)
+    # post-processing for each image in batch
+    outputs = tf.map_fn(post_process, input_fn, fn_output_signature=tf.TensorSpec(dtype=tf.float32))
 
-    output0 = outputs[0]
-    output1 = outputs[1]
-    dataset = tf.data.Dataset.from_tensor_slices((output0, output1))
-    
-    final_mask = tf.zeros((img_height, img_width, m.nc), dtype=np.uint8)
-    final_masks = []
-    # for each image in batch
-    # for detect, segment in zip(output0, output1):
-    for detect, segment in dataset:
-        detect = detect.transpose(1, 0)
-
-        mi = 4 + m.nc  # Mask start index
-        nm = segment.shape[0]  # Number of masks
-
-        boxes = detect[:, :mi]
-        masks = detect[:, mi:]
-        segment_reshaped = segment.reshape(nm, -1)
-        masks = masks @ segment_reshaped  # parse mask from segment with index from detect head
-        boxes = tf.concat((boxes, masks), axis=1)
-        # for each box: 0-4:xyxy, 4-(4+nc): class probabilities, (4+nc)- pixels of segmentation mask (as a single row)
-
-        # filter each detected object based on their class probability
-        objects = []
-        for row in boxes:
-            prob = tf.reduce_max(row[4:mi])
-            if prob < 0.4:
-                continue
-            class_id = tf.argmax(row[4:mi])  # get index of class with best probability
-            x1, y1, x2, y2 = row[:4]
-            mask = m.get_mask(row[mi:], (x1, y1, x2, y2))
-            objects.append([x1, y1, x2, y2, class_id, prob, mask])
-
-        # filter overlapped boxes with non-maximum suppression
-        objects.sort(key=lambda x: x[5], reverse=True)
-        filtered_objects = []
-        while len(objects) > 0:
-            filtered_objects.append(objects[0])
-            objects = [box for box in objects if iou(box, objects[0]) < 0.7]
-
-        # convert the object mask with coordinates and class id into a single mask
-        final_mask = tf.zeros((img_height, img_width, m.nc), dtype=np.uint8)
-        for obj in filtered_objects:
-            mask = obj[6][0]
-            x1, y1, x2, y2 = obj[6][1]
-            class_id = tf.one_hot(obj[4], m.nc)
-            final_mask[y1:y2, x1:x2, -1] = tf.where(mask > 0, class_id, 0)
-
-    final_masks.append(final_mask)  # stack of masks in all batches
-    outputs = tf.stack(final_masks, axis=0)
     yolo_model = keras.Model(inputs=inputs, outputs=outputs, name='YOLOv8-Seg')
     return yolo_model
 
