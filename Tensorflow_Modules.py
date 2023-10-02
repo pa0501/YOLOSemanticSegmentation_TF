@@ -14,7 +14,7 @@ class Conv(layers.Layer):
             strides=1,
             padding="same",
             activation="swish"):
-        super().__init__()
+        super(Conv, self).__init__()
         self.output_channel = output_channel
         self.kernel_size = kernel_size
         self.activation = activation
@@ -57,7 +57,7 @@ class Bottleneck(layers.Layer):
             shortcut=True,
             kernel_size=(3, 3),
             expansion=0.5):
-        super().__init__()
+        super(Bottleneck, self).__init__()
         self.c2 = output_channel
         self.e = expansion
         self.c1 = int(self.c2 * self.e)
@@ -92,7 +92,7 @@ class C2f(layers.Layer):
             repeat=1,
             shortcut=False,
             expansion=0.5):
-        super().__init__()
+        super(C2f, self).__init__()
         self.c2 = output_channel
         self.e = expansion
         self.n = repeat
@@ -130,7 +130,7 @@ class C2f(layers.Layer):
 class SPPF(layers.Layer):
     # Spatial Pyramid Pooling - Fast (SPPF) layer for YOLOv5 by Glenn Jocher
     def __init__(self, input_channel, output_channel, k=5):  # equivalent to SPP(k=(5, 9, 13))
-        super().__init__()
+        super(SPPF, self).__init__()
         self.c_ = input_channel // 2  # hidden channels
         self.c2 = output_channel
         self.k = k
@@ -167,7 +167,7 @@ class DFL(layers.Layer):
     """
 
     def __init__(self, c1=16):
-        super().__init__()
+        super(DFL, self).__init__()
         self.c1 = c1
         x = tf.range(self.c1, dtype=tf.float32)
         weights_ini = tf.reshape(x, (1, 1, self.c1, 1))
@@ -230,7 +230,7 @@ class Detect(layers.Layer):
     strides = []
 
     def __init__(self, nc=80, ch=()):  # detection layer
-        super().__init__()
+        super(Detect, self).__init__()
         self.nc = nc  # number of classes
         self.nl = len(ch)  # number of detection layers
         self.reg_max = 16  # DFL channels (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x model)
@@ -336,7 +336,7 @@ class Proto(layers.Layer):
 
 class Segment(Detect):
     def __init__(self, nc=80, nm=32, npr=256, ch=()):
-        super().__init__(nc, ch)
+        super(Segment, self).__init__(nc, ch)
         self.nm = nm  # number of masks
         self.npr = npr  # number of protos
         self.proto = Proto(self.npr, self.nm)  # protos
@@ -541,11 +541,13 @@ class MapLayer(layers.Layer):
 
 
 def postprocess_wrapper(inputs, img_shape):
-    #bs = tf.shape(inputs[0])[0]
-    #if bs is None:
-    #    input0, input1 = inputs
-    #    return
-    #else:
+    bs = tf.shape(inputs[0])[0]
+    if bs is None:
+        input0, input1 = inputs
+        input0_reshaped = tf.reshape(input0, [10, input0.shape[1], input0.shape[2]])
+        input1_reshaped = tf.reshape(input1, [10, input1.shape[1], input1.shape[2], input1.shape[3]])
+        inputs = [input0_reshaped, input1_reshaped]
+
     return tf.map_fn(post_process,
                      inputs,
                      fn_output_signature=tf.TensorSpec(shape=(img_shape[0], img_shape[1], img_shape[2]),
