@@ -529,11 +529,17 @@ def post_process(x):
 
 
 class MapLayer(layers.Layer):
-    def call(self, input, img_shape):
+    def call(self, inputs):
+        img_shape = inputs[-1].shape
+        img_hw = max(img_shape)
+        nc = img_shape[2]
+        fn_input = inputs[:, -1]
         return tf.map_fn(post_process,
-                         input,
-                         fn_output_signature=tf.TensorSpec(shape=(img_shape[0], img_shape[1], img_shape[2]),
+                         fn_input,
+                         fn_output_signature=tf.TensorSpec(shape=(img_hw, img_hw, nc),
                                                            dtype=tf.float32))
+
+
 def postprocess_wrapper(input, img_shape):
     return tf.map_fn(post_process,
                      input,
@@ -560,10 +566,10 @@ def Yolov8_Seg(input_shape, nc=4):
     seg_inputs = [xs1, xs2, xs3]
     # segment = m.segment_head(nc=self.nc, ch=ch)
     seg_outputs = m.segment_head(seg_inputs)
-    
+    map_inputs = seg_outputs + (img_shape,)
     # post-processing for each image in batch
-    outputs = layers.Lambda(lambda x: post_process(x, img_shape))(seg_outputs)
-    #outputs = MapLayer()(seg_outputs, img_shape)
+    # outputs = layers.Lambda(lambda x: post_process(x, img_shape))(seg_outputs)
+    outputs = MapLayer()(map_inputs)
 
     yolo_model = keras.Model(inputs=inputs, outputs=outputs, name='YOLOv8-Seg')
     return yolo_model
