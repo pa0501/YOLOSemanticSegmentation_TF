@@ -530,7 +530,7 @@ def post_process(x):
 
 class MapLayer(layers.Layer):
     def call(self, inputs):
-        img_shape = inputs[-1].shape
+        img_shape = inputs[-1]
         img_hw = max(img_shape)
         nc = img_shape[2]
         fn_input = inputs[:, -1]
