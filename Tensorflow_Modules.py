@@ -534,7 +534,7 @@ class MapLayer(layers.Layer):
                          input,
                          fn_output_signature=tf.TensorSpec(shape=(img_shape[0], img_shape[1], img_shape[2]),
                                                            dtype=tf.float32))
-def post_process(input, img_shape):
+def postprocess_wrapper(input, img_shape):
     return tf.map_fn(post_process,
                      input,
                      fn_output_signature=tf.TensorSpec(shape=(img_shape[0], img_shape[1], img_shape[2]),
