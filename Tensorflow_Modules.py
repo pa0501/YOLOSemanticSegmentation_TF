@@ -541,19 +541,13 @@ class MapLayer(layers.Layer):
 
 
 def postprocess_wrapper(inputs, img_shape):
-    bs = tf.shape(inputs[0])[0]
-    if bs is None:
-        input0, input1 = inputs
-        input0_reshaped = tf.reshape(input0, [10, input0.shape[1], input0.shape[2]])
-        input1_reshaped = tf.reshape(input1, [10, input1.shape[1], input1.shape[2], input1.shape[3]])
-        inputs = [input0_reshaped, input1_reshaped]
-
     return tf.map_fn(post_process,
                      inputs,
                      fn_output_signature=tf.TensorSpec(shape=(img_shape[0], img_shape[1], img_shape[2]),
                                                        dtype=tf.float32))
 
-
+# -> could try tf.compat.v1.disable_eager_execution()
+# -> version missmatch
 def Yolov8_Seg(input_shape, nc=4):
     m = YOLOv8Seg_BaseModel(input_shape, nc=nc)
     img_hw = max(input_shape)
@@ -573,9 +567,17 @@ def Yolov8_Seg(input_shape, nc=4):
     seg_inputs = [xs1, xs2, xs3]
     # segment = m.segment_head(nc=self.nc, ch=ch)
     seg_outputs = m.segment_head(seg_inputs)
-    map_inputs = seg_outputs + (img_shape,)
+    
+    bs = tf.shape(seg_outputs[0])[0]
+    if bs is None:
+        input0, input1 = seg_outputs
+        input0_reshaped = tf.reshape(input0, [10, input0.shape[1], input0.shape[2]])
+        input1_reshaped = tf.reshape(input1, [10, input1.shape[1], input1.shape[2], input1.shape[3]])
+        map_inputs = [input0_reshaped, input1_reshaped]
+    else:
+        map_inputs = seg_outputs
     # post-processing for each image in batch
-    outputs = layers.Lambda(lambda x: postprocess_wrapper(x, img_shape))(seg_outputs)
+    outputs = layers.Lambda(lambda x: postprocess_wrapper(x, img_shape))(map_inputs)
     #outputs = MapLayer()(map_inputs)
 
     yolo_model = keras.Model(inputs=inputs, outputs=outputs, name='YOLOv8-Seg')
