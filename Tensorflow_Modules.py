@@ -4,6 +4,7 @@ from keras import layers
 import numpy as np
 from PIL import Image
 
+tf.compat.v1.disable_eager_execution()
 
 # TF implementation
 class Conv(layers.Layer):
@@ -570,11 +571,13 @@ def Yolov8_Seg(input_shape, nc=4):
     
     bs = tf.shape(seg_outputs[0])[0]
     if bs is None:
+        print("bs is None")
         input0, input1 = seg_outputs
         input0_reshaped = tf.reshape(input0, [10, input0.shape[1], input0.shape[2]])
         input1_reshaped = tf.reshape(input1, [10, input1.shape[1], input1.shape[2], input1.shape[3]])
         map_inputs = [input0_reshaped, input1_reshaped]
     else:
+        print("bs is not None")
         map_inputs = seg_outputs
     # post-processing for each image in batch
     outputs = layers.Lambda(lambda x: postprocess_wrapper(x, img_shape))(map_inputs)
