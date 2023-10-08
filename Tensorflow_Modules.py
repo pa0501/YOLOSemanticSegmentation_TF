@@ -163,7 +163,7 @@ class C2f(layers.Layer):
     def call(self, x):
         y = tf.split(self.cv1(x),
                      num_or_size_splits=2,
-                     axis=1)  # channel axis
+                     axis=3)  # channel axis
         y.extend([m(y[-1]) for m in self.m])
         out = self.cv2(tf.concat(y, axis=3))
         return out
@@ -283,6 +283,7 @@ def Yolov8(input_shape, nc=4):
     #Backbone: CSPDarknet53 feature extractor
     p1 = m.cv1(m.inputs)  # p1 h/2
     p2 = m.cv2(p1)  # p2 h/4
+    print(p2)
     xs1 = m.seq1(p2)  # p3 h/8
     xs2 = m.seq2(xs1) # p3 h/16
     xs3 = m.seq3(xs2)  #  Base h/32
@@ -315,10 +316,10 @@ def Yolov8(input_shape, nc=4):
             b. In segment head, transposed conv with s = 2 to up-sample'''
 
     p0 = m.c2f9(m.dcv1(f2))  # p4 h/16
-    p0 = m.c2f10(m.dcv2(tf.concat(p0, f1, axis=3)))  # p3 h/8
-    p0 = m.c2f11(m.dcv3(tf.concat(p0, f0, axis=3)))  # p2 h/4
-    p0 = m.c2f12(m.dcv4(tf.concat(p0, p2, axis=3)))  # p1 h/2
-    p0 = m.c2f13(m.dcv5(tf.concat(p0, p1, axis=3)))  # p0
+    p0 = m.c2f10(m.dcv2(tf.concat([p0, f1], axis=3)))  # p3 h/8
+    p0 = m.c2f11(m.dcv3(tf.concat([p0, f0], axis=3)))  # p2 h/4
+    p0 = m.c2f12(m.dcv4(tf.concat([p0, p2], axis=3)))  # p1 h/2
+    p0 = m.c2f13(m.dcv5(tf.concat([p0, p1], axis=3)))  # p0
 
     outputs = m.cv0(p0)
     yolo_model = tf.keras.models.Model(inputs=m.inputs, outputs=outputs, name='YOLOv8-Seg')
@@ -336,21 +337,22 @@ def test(x):
 
 if __name__ == "__main__":
     input_shape = (256, 256, 1)
-    # input_tensor = tf.keras.layers.Input(shape=input_shape)
+    batch_size = 4
+    input_tensor = tf.random.normal((batch_size,) + input_shape)
     nclasses = 4
-    # model = Yolov8Seg_Model(input_shape, nc=nclasses, training=True)
+    model = Yolov8(input_shape, nc=nclasses)
     # img = tf.convert_to_tensor(np.expand_dim(np.zeros((1024, 1024)), axis=-1)) #-> output: 1024x1024x4
     # Print model summary
     # model.summary()
 
 
-    test_shape = (256, 256, 768)
-    batch_size = 4
-    input_test = tf.random.normal((batch_size,) + test_shape)
-    out_test = test(input_test)
+    #test_shape = (256, 256, 768)
+
+    #input_test = tf.random.normal((batch_size,) + test_shape)
+    #out_test = test(input_test)
     # Generate random input tensor
 
 
     # Pass input_tensor through the model
-    #output = model(input_tensor)
-    print(out_test)
+    output = model(input_tensor)
+    print(output)
