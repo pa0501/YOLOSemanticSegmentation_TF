@@ -270,9 +270,6 @@ class YOLOv8_BaseModel(tf.keras.Model):
         self.dcv5 = DeConv(output_channel=64, kernel_size=3, strides=2)  #
         self.c2f13 = C2f(output_channel=64, repeat=3, shortcut=True)
 
-        self.dcv6 = DeConv(output_channel=128, kernel_size=3, strides=2)
-        self.dcv7 = DeConv(output_channel=64, kernel_size=3, strides=2)
-
         self.cv0 = Conv(output_channel=self.nc, kernel_size=1, strides=1)
 
 def Yolov8(input_shape, nc=4):
@@ -322,6 +319,7 @@ def Yolov8(input_shape, nc=4):
     p0 = m.c2f13(m.dcv5(tf.concat([p0, p1], axis=3)))  # p0
 
     outputs = m.cv0(p0)
+    outputs = tf.keras.layers.Softmax()(outputs)
     yolo_model = tf.keras.models.Model(inputs=m.inputs, outputs=outputs, name='YOLOv8-Seg')
     return yolo_model
 
