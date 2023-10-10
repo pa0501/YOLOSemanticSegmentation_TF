@@ -280,7 +280,6 @@ def Yolov8(input_shape, nc=4):
     #Backbone: CSPDarknet53 feature extractor
     p1 = m.cv1(m.inputs)  # p1 h/2
     p2 = m.cv2(p1)  # p2 h/4
-    print(p2)
     xs1 = m.seq1(p2)  # p3 h/8
     xs2 = m.seq2(xs1) # p3 h/16
     xs3 = m.seq3(xs2)  #  Base h/32
